@@ -157,6 +157,51 @@ def logsumexp(
         return ln_exp_sum
 
 
+def get_neighbour_pairs(
+    conformer: torch.Tensor, box_vectors: torch.Tensor | None, cutoff: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Get the pairs of atoms that are within a certain cutoff distance of each other.
+
+    Args:
+        conformer: The conformer to find the pairs of with shape ``(n_atoms, 3)``.
+        box_vectors: The box vectors of the system with shape ``(3, 3)``.
+            If None, non-periodic.
+        cutoff: The cutoff distance.
+
+    Returns:
+        A tuple of:
+            - A tensor of shape ``(2, n_pairs)`` containing the indices of the pairs
+              of atoms $(i, j)$ that are within the cutoff distance of each other.
+            - A tensor of shape ``(n_pairs, 3)`` containing the displacement vectors
+              $r_i - r_j$ (wrapped if PBC are used).
+            - A tensor of shape ``(n_pairs,)`` containing the distances between the
+              pairs of atoms.
+            - A tensor of shape ``(n_pairs, 3)`` containing the lattice shifts
+              applied to each pair.
+    """
+    num_atoms = conformer.shape[0]
+    device = conformer.device
+
+    # Get i,j indices where j>i (upper triangle)
+    uij = torch.triu_indices(num_atoms, num_atoms, 1, device=device)
+    deltas = conformer[uij[0]] - conformer[uij[1]]
+
+    if box_vectors is not None:
+        inv_box = torch.linalg.inv(box_vectors)
+        shifts = torch.round(deltas @ inv_box)
+        wrapped_deltas = deltas - shifts @ box_vectors
+        distances = torch.linalg.norm(wrapped_deltas, dim=1)
+    else:
+        wrapped_deltas = deltas
+        distances = torch.linalg.norm(wrapped_deltas, dim=1)
+        shifts = torch.zeros_like(wrapped_deltas)
+
+    # Filter pairs within cutoff
+    mask = distances <= cutoff
+
+    return uij[:, mask], wrapped_deltas[mask], distances[mask], shifts[mask]
+
+
 def to_upper_tri_idx(
     i: torch.Tensor, j: torch.Tensor, n: int, include_diag: bool = False
 ) -> torch.Tensor:

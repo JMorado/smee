@@ -130,30 +130,16 @@ def compute_pairwise_scales(
 def _compute_pairwise_periodic(
     conformer: torch.Tensor, box_vectors: torch.Tensor, cutoff: torch.Tensor
 ) -> PairwiseDistances:
-    import NNPOps.neighbors
-
     assert box_vectors is not None, "box vectors must be specified for PBC."
     assert len(conformer.shape) == 2, "the conformer must not have a batch dimension."
 
-    (
-        pair_idxs,
-        deltas,
-        distances,
-        _,
-    ) = NNPOps.neighbors.getNeighborPairs(conformer, cutoff.item(), -1, box_vectors)
+    pair_idxs, deltas, distances, _ = smee.utils.get_neighbour_pairs(
+        conformer, box_vectors, cutoff
+    )
 
-    are_interacting = ~torch.isnan(distances)
-
-    distances = distances[are_interacting]
-    deltas = deltas[are_interacting, :]
-    pair_idxs = pair_idxs[:, are_interacting]
-    # we sort the indices to get values correponding to upper triangles
-    # but we need to track which have been reversed so we can reverse the deltas
-    pair_idxs, indices = pair_idxs.sort(dim=0)
-    reversed = -(indices[0] == 1).to(deltas.dtype)
-    deltas = deltas * reversed[:, None]
-
-    return PairwiseDistances(pair_idxs.T.contiguous(), deltas, distances, cutoff)
+    return PairwiseDistances(
+        pair_idxs.T.contiguous().to(torch.int32), deltas, distances, cutoff
+    )
 
 
 def _compute_pairwise_non_periodic(conformer: torch.Tensor) -> PairwiseDistances:

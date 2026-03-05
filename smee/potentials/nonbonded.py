@@ -2,6 +2,7 @@
 
 import collections
 import math
+import os
 import typing
 
 import openff.units
@@ -507,13 +508,15 @@ def compute_lj_energy(
     energies *= switch_fn
 
     energy = energies.sum(-1)
-    energy += _compute_lj_lrc(
-        system,
-        potential.to(precision="double"),
-        switch_width.double(),
-        pairwise.cutoff.double(),
-        torch.det(box_vectors),
-    )
+
+    if os.getenv("SMEE_LJ_LRC", 0) == 1:
+        energy += _compute_lj_lrc(
+            system,
+            potential.to(precision="double"),
+            switch_width.double(),
+            pairwise.cutoff.double(),
+            torch.det(box_vectors),
+        )
 
     return energy
 
@@ -789,13 +792,14 @@ def compute_dexp_energy(
 
     energy = energies.sum(-1)
 
-    energy += _compute_dexp_lrc(
-        system,
-        potential.to(precision="double"),
-        switch_width.double(),
-        pairwise.cutoff.double(),
-        torch.det(box_vectors),
-    )
+    if os.getenv("SMEE_LJ_LRC", 0) == 1:
+        energy += _compute_dexp_lrc(
+            system,
+            potential.to(precision="double"),
+            switch_width.double(),
+            pairwise.cutoff.double(),
+            torch.det(box_vectors),
+        )
 
     return energy
 
@@ -1013,8 +1017,53 @@ def compute_coulomb_energy(
         raise NotImplementedError("exceptions are not supported for charges.")
 
     if system.is_periodic:
-        return _compute_coulomb_energy_periodic(
-            system, conformer, box_vectors, potential, pairwise
-        )
+        if os.getenv("SMEE_PME", 0) == 1:
+            return _compute_coulomb_energy_periodic(
+                system, conformer, box_vectors, potential, pairwise
+            )
+        else:
+            return _compute_coulomb_reaction_field(
+                system, conformer, box_vectors, potential, pairwise
+            )
     else:
         return _compute_coulomb_energy_non_periodic(system, potential, pairwise)
+
+
+def _compute_coulomb_reaction_field(
+    system: smee.TensorSystem,
+    conformer: torch.Tensor,
+    box_vectors: torch.Tensor,
+    potential: smee.TensorPotential,
+    pairwise: PairwiseDistances,
+) -> torch.Tensor:
+    assert system.is_periodic, "the system must be periodic."
+
+    charges = smee.potentials.broadcast_parameters(system, potential).squeeze(-1)
+    cutoff = potential.attributes[potential.attribute_cols.index(smee.CUTOFF_ATTRIBUTE)]
+    dielectric_constant = 1.0
+    k_rf = (1 / cutoff**3) * (dielectric_constant - 1) / (2 * dielectric_constant + 1)
+    c_rf = (1 / cutoff) * (3 * dielectric_constant) / (2 * dielectric_constant + 1)
+
+    all_pair_scales = compute_pairwise_scales(system, potential)
+
+    pairs_1d = smee.utils.to_upper_tri_idx(
+        pairwise.idxs[:, 0], pairwise.idxs[:, 1], system.n_particles
+    )
+    pair_scales = all_pair_scales[pairs_1d]
+
+    # Exclusions are not subject to the reaction field term
+    is_rf = torch.isclose(pair_scales, torch.tensor(1.0, device=pair_scales.device, dtype=pair_scales.dtype))
+
+    q_i = charges[pairwise.idxs[:, 0]]
+    q_j = charges[pairwise.idxs[:, 1]]
+    r = pairwise.distances
+
+    # E = PRE * q_i * q_j * [ scale/r + is_rf * (k_rf * r^2 - c_rf) ]
+    energy = (
+        _COULOMB_PRE_FACTOR
+        * q_i
+        * q_j
+        * (pair_scales / r + is_rf.to(r.dtype) * (k_rf * r**2 - c_rf))
+    ).sum(-1)
+
+    return energy

@@ -495,7 +495,7 @@ def compute_lj_energy(
 
     energy = energies.sum(-1)
 
-    if os.getenv("SMEE_LJ_LRC", 0) == 1:
+    if os.getenv("SMEE_LJ_LRC", "0") == "1":
         energy += _compute_lj_lrc(
             system,
             potential.to(precision="double"),
@@ -778,7 +778,7 @@ def compute_dexp_energy(
 
     energy = energies.sum(-1)
 
-    if os.getenv("SMEE_LJ_LRC", 0) == 1:
+    if os.getenv("SMEE_LJ_LRC", "0") == "1":
         energy += _compute_dexp_lrc(
             system,
             potential.to(precision="double"),
@@ -1003,7 +1003,7 @@ def compute_coulomb_energy(
         raise NotImplementedError("exceptions are not supported for charges.")
 
     if system.is_periodic:
-        if os.getenv("SMEE_PME", 0) == 1:
+        if os.getenv("SMEE_PME", "0") == "1":
             return _compute_coulomb_energy_periodic(
                 system, conformer, box_vectors, potential, pairwise
             )

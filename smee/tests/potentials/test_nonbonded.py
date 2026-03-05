@@ -146,7 +146,7 @@ def test_compute_pairwise_periodic():
     pairwise = compute_pairwise(system, coords, box_vectors, cutoff)
 
     expected_idxs = torch.tensor(
-        [[0, 1], [0, 2], [1, 2], [0, 3], [1, 3], [0, 4], [2, 4], [3, 4]],
+        [[0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [1, 3], [2, 4], [3, 4]],
         dtype=torch.int32,
     )
     n_expected_pairs = len(expected_idxs)
@@ -158,10 +158,25 @@ def test_compute_pairwise_periodic():
     assert pairwise.deltas.shape == (n_expected_pairs, 3)
     assert pairwise.deltas.dtype == torch.float32
 
-    expected_distances = torch.tensor([4.0, 4.0, 8.0, 8.0, 4.0, 8.0, 4.0, 8.0])
+    expected_distances = torch.tensor([4.0, 4.0, 8.0, 8.0, 8.0, 4.0, 4.0, 8.0])
     assert torch.allclose(pairwise.distances, expected_distances)
     assert pairwise.distances.shape == (n_expected_pairs,)
     assert pairwise.distances.dtype == torch.float32
+
+    expected_deltas = torch.tensor(
+        [
+            [4.0, 0.0, 0.0],
+            [-4.0, 0.0, 0.0],
+            [8.0, 0.0, 0.0],
+            [-8.0, 0.0, 0.0],
+            [-8.0, 0.0, 0.0],
+            [4.0, 0.0, 0.0],
+            [-4.0, 0.0, 0.0],
+            [8.0, 0.0, 0.0],
+        ],
+        dtype=torch.float32,
+    )
+    assert torch.allclose(pairwise.deltas, expected_deltas)
 
     assert torch.isclose(cutoff, pairwise.cutoff)
 
